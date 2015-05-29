@@ -4,7 +4,7 @@ CakePHP HybridAuth Plugin
 [![Total Downloads](https://img.shields.io/packagist/dt/ADmad/CakePHP-HybridAuth.svg?style=flat-square)](https://packagist.org/packages/admad/cakephp-hybridauth)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
-A CakePHP plugin which allows using the [HybridAuth](http://hybridauth.sourceforge.net/)
+A CakePHP plugin that adds support for the [HybridAuth](http://hybridauth.sourceforge.net/)
 social sign on library.
 
 Requirements
@@ -18,13 +18,13 @@ Installation
 Run:
 
 ```
-composer require admad/cakephp-hybridauth:~3.0
+composer require admad/cakephp-hybridauth:~3.1
 ```
 
 Setup
 -----
 
-Load the plugin by adding following to your app's boostrap:
+Load the plugin by adding following to your app's `config/bootstrap.php`:
 
 ```php
 Plugin::load('ADmad/HybridAuth', ['bootstrap' => true, 'routes' => true]);
@@ -37,6 +37,7 @@ Make a config file `config/hybridauth.php`
 Eg.
 
 ```php
+<?php
 use Cake\Core\Configure;
 
 $config['HybridAuth'] = [
@@ -63,7 +64,7 @@ The plugin also expects that your users table used for authentication contains
 fields `provider` and `provider_uid`. The fields are configurable through the
 `HybridAuthAuthenticate` authenticator.
 
-```MySQL
+```sql
 CREATE TABLE IF NOT EXISTS `users` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `email` varchar(200) NOT NULL,
@@ -71,25 +72,26 @@ CREATE TABLE IF NOT EXISTS `users` (
     `name` varchar(200) NOT NULL,
     `provider` varchar(100) NOT NULL,
     `provider_uid` varchar(255) NOT NULL,
-    `created` datetime NOT NULL,
-    `modified` datetime NOT NULL
+    `created` datetime DEFAULT NULL,
+    `modified` datetime DEFAULT NULL
     PRIMARY KEY (`id`)
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8 ;
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
 ```
 
 Usage
 -----
 
 Check the CakePHP manual on how to configure and use the `AuthComponent` with
-required authenticator. You would have something like this in your `AppController`'s `initialize` method.
+required authenticator. You would have something like this in your `AppController`'s
+`initialize()` method.
 
 ```php
 $this->loadComponent('Auth', [
-        'authenticate' => [
-            'Form',
-            'ADmad/HybridAuth.HybridAuth'
-        ]
-    ]);
+    'authenticate' => [
+        'Form',
+        'ADmad/HybridAuth.HybridAuth'
+    ]
+]);
 ```
 
 Your controller's login action should be similar to this:
@@ -119,12 +121,43 @@ in hybridauth documentation to see various ways to setup your login page.
 
 Once a user is authenticated through the provider the authenticator gets the user
 profile from the identity provider and using that tries to find the corresponding
-user record in your app's users table. If no user is found and `registrationCallback`
-option is specified the specified method from the `User` model is called. You
-can use the callback to save user record to database.
+user record in your app's users table.
 
-If no callback is specified the profile returned by identity provider itself is
-returned by the authenticator.
+If corresponding app user is found a `HybridAuth.newUser` event is dispatched.
+You can setup a listener for this event which saves user record to database.
+The listener callback should return either user record or `true`.
+
+```php
+// In your src/Controller/UsersController.php
+public function beforeFilter(\Cake\Event\Event $event)
+{
+    $this->eventManager()->on('HybridAuth.newUser', [$this->Users, 'register']);
+}
+
+// In your src/Model/Table/UsersTable.php
+public function register(\Cake\Event\Event $event)
+{
+    // List of possible profile fields is available here:
+    // http://hybridauth.sourceforge.net/userguide/Profile_Data_User_Profile.html
+    $user = $this->newEntity([
+        'name' => $event->data['profile']->displayName,
+        'provider_uid' => $event->data['profile']->identifier,
+        'provider' => $event->data['provider']
+    ]);
+
+    if ($this->save($user)) {
+        return true;
+    }
+
+    // Instead of returning false you can throw an exception if you want to ensure
+    // there's always an app user record associated with a social profile
+    // used for authentication.
+    return false;
+}
+```
+
+If matching app user is not found the profile returned by identity provider
+itself is returned by the authenticator.
 
 Copyright
 ---------
