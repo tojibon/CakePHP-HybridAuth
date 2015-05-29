@@ -5,6 +5,7 @@ use Cake\Auth\FormAuthenticate;
 use Cake\Controller\ComponentRegistry;
 use Cake\Core\Configure;
 use Cake\Event\Event;
+use Cake\Event\EventManagerTrait;
 use Cake\Network\Request;
 use Cake\Network\Response;
 use Cake\ORM\TableRegistry;
@@ -18,6 +19,8 @@ use Cake\Routing\Router;
  */
 class HybridAuthAuthenticate extends FormAuthenticate
 {
+
+    use EventManagerTrait;
 
     /**
      * HybridAuth instance
@@ -167,12 +170,12 @@ class HybridAuthAuthenticate extends FormAuthenticate
 
     /**
      * Get user record for hybrid auth adapter and try to get associated user record
-     * from your application database. If app user record is not found and
-     * `registrationCallback` is set the specified callback function of User model
-     * is called.
+     * from your application database. If app user record is not found
+     * "HybridAuth.newUser" event is dispatched which listeners can use to
+     * register and return new user record.
      *
      * @param string $provider Provider name.
-     * @param object $adapter Hybrid auth adapter instance.
+     * @param \Hybrid_Provider_Adapter $adapter Hybrid auth adapter instance.
      * @return array User record
      */
     protected function _getUser($provider, $adapter)
@@ -198,19 +201,14 @@ class HybridAuthAuthenticate extends FormAuthenticate
             return $user;
         }
 
-        if (!empty($this->_config['registrationCallback'])) {
-            $return = call_user_func_array(
-                [
-                    TableRegistry::get($userModel),
-                    $this->_config['registrationCallback']
-                ],
-                [$provider, $providerProfile]
-            );
-            if ($return) {
-                $user = $this->_fetchUserFromDb($conditions);
-                if ($user) {
-                    return $user;
-                }
+        $result = $this->_newUser($provider, $providerProfile);
+        if ($result) {
+            if (is_array($result)) {
+                return $result;
+            }
+            $user = $this->_fetchUserFromDb($conditions);
+            if ($user) {
+                return $user;
             }
         }
 
@@ -218,7 +216,7 @@ class HybridAuthAuthenticate extends FormAuthenticate
     }
 
     /**
-     * Fetch user from database matching required conditions
+     * Fetch user from database matching required conditions.
      *
      * @param array $conditions Query conditions.
      * @return array|bool User array on success, false on failure.
@@ -238,9 +236,9 @@ class HybridAuthAuthenticate extends FormAuthenticate
         }
 
         $result = $table
-        ->where($conditions)
-        ->hydrate(false)
-        ->first();
+            ->where($conditions)
+            ->hydrate(false)
+            ->first();
 
         if ($result) {
             if (isset($this->_config['fields']['password'])) {
@@ -249,6 +247,42 @@ class HybridAuthAuthenticate extends FormAuthenticate
             return $result;
         }
         return false;
+    }
+
+    /**
+     * Dispatches "HybridAuth.newUser" event.
+     *
+     * @param string $provider Provider name.
+     * @param \Hybrid_User_Profile $profile User profile.
+     * @return mixed
+     */
+    protected function _newUser($provider, $profile)
+    {
+        $event = $this->dispatch(
+            'HybridAuth.newUser',
+            [
+                'provider' => $provider,
+                'profile' => $profile
+            ]
+        );
+
+        if (!empty($event->result)) {
+            return $event->result;
+        }
+
+        if (!empty($this->_config['registrationCallback'])) {
+            trigger_error(
+                '"registrationCallback" config is deprecated. Listen for "HybridAuth.newUser" event instead.',
+                E_USER_DEPRECATED
+            );
+            return call_user_func_array(
+                [
+                    TableRegistry::get($userModel),
+                    $this->_config['registrationCallback']
+                ],
+                [$provider, $profile]
+            );
+        }
     }
 
     /**
