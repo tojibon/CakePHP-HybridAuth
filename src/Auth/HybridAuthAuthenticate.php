@@ -259,7 +259,7 @@ class HybridAuthAuthenticate extends FormAuthenticate
      */
     protected function _newUser($provider, $profile)
     {
-        $event = $this->dispatch(
+        $event = $this->dispatchEvent(
             'HybridAuth.newUser',
             [
                 'provider' => $provider,
